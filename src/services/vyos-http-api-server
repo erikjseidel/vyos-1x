@@ -1,3 +1,4 @@
+#!/usr/share/vyos-http-api-tools/bin/python3
 #
 # Copyright (C) 2019-2024 VyOS maintainers and contributors
 #
@@ -47,6 +48,7 @@ from vyos.configdiff import get_config_diff
 from vyos.configsession import ConfigSession
 from vyos.configsession import ConfigSessionError
 from vyos.defaults import api_config_state
+from vyos.config_mgmt import ConfigMgmt
 
 import api.graphql.state
 
@@ -391,7 +393,7 @@ class MultipartRequest(Request):
                         elif not all(isinstance(el, str) for el in c['path']):
                             self.form_err = (400,
                             f"Malformed command '{0}': 'path' field must be a list of strings")
-                    if endpoint in ('/configure'):
+                    if endpoint in ('/configure', '/configure-compare'):
                         if not c['path']:
                             self.form_err = (400,
                             f"Malformed command '{c}': 'path' list must be non-empty")
@@ -458,7 +460,7 @@ def call_commit(s: ConfigSession):
         else:
             logger.warning(f"ConfigSessionError: {e}")
 
-def _configure_op(data: Union[ConfigureModel, ConfigureListModel,
+def _configure_op(config_op, data: Union[ConfigureModel, ConfigureListModel,
                               ConfigSectionModel, ConfigSectionListModel,
                               ConfigSectionTreeModel],
                   request: Request, background_tasks: BackgroundTasks):
@@ -536,13 +538,20 @@ def _configure_op(data: Union[ConfigureModel, ConfigureListModel,
         config = Config(session_env=env)
         d = get_config_diff(config)
 
-        if d.is_node_changed(['service', 'https']):
-            background_tasks.add_task(call_commit, session)
-            msg = self_ref_msg
-        else:
-            session.commit()
+        if config_op == 'compare':
+            config_mgmt = ConfigMgmt(session_env=env, config=config)
+            msg, _ = config_mgmt.compare()
 
-        logger.info(f"Configuration modified via HTTP API using key '{app.state.vyos_id}'")
+            session.discard()
+        else:
+            if d.is_node_changed(['service', 'https']):
+                background_tasks.add_task(call_commit, session)
+                msg = self_ref_msg
+            else:
+                session.commit()
+
+            logger.info(f"Configuration modified via HTTP API using key '{app.state.vyos_id}'")
+
     except ConfigSessionError as e:
         session.discard()
         status = 400
@@ -568,7 +577,13 @@ def _configure_op(data: Union[ConfigureModel, ConfigureListModel,
 def configure_op(data: Union[ConfigureModel,
                              ConfigureListModel],
                        request: Request, background_tasks: BackgroundTasks):
-    return _configure_op(data, request, background_tasks)
+    return _configure_op('commit', data, request, background_tasks)
+
+@app.post('/configure-compare')
+def configure_op(data: Union[ConfigureModel,
+                             ConfigureListModel],
+                       request: Request, background_tasks: BackgroundTasks):
+    return _configure_op('compare', data, request, background_tasks)
 
 @app.post('/configure-section')
 def configure_section_op(data: Union[ConfigSectionModel,
