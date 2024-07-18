@@ -252,16 +252,16 @@ class RebootModel(ApiModel):
             }
         }
 
-class RunModel(ApiModel):                                                                                                                                                    
-    commands: List[StrictStr]                                                                                                                                                
-                                                                                                                                                                             
-    class Config:                                                                                                                                                            
-        schema_extra = {                                                                                                                                                     
-            "example": {                                                                                                                                                     
-                "key": "id_key",                                                                                                                                             
-                "commands": ["command1", "command2"],                                                                                                                        
-            }                                                                                                                                                                
-        } 
+class RunModel(ApiModel):
+    commands: List[StrictStr]
+
+    class Config:
+        schema_extra = {
+            "example": {
+                "key": "id_key",
+                "commands": ["command1", "command2"],
+            }
+        }
 
 class ResetModel(ApiModel):
     op: StrictStr
