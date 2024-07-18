@@ -16,7 +16,7 @@
 
 import os
 import sys
-import signal                                                                                                                                                                
+import signal
 import psutil
 import grp
 import copy
@@ -412,15 +412,15 @@ class MultipartRequest(Request):
                         elif not all(isinstance(el, str) for el in c['path']):
                             self.form_err = (400,
                             f"Malformed command '{0}': 'path' field must be a list of strings")
-                    if endpoint in ('/run'):                                                   
-                        if 'commands' not in c:                                                
-                            self.form_err = (400,                                              
-                            f"Malformed command '{c}': missing 'commands' field")              
-                        elif not isinstance(c['commands'], list):                              
-                            self.form_err = (400,                                              
-                            f"Malformed command '{c}': 'commands' field must be a list")       
-                        elif not all(isinstance(el, str) for el in c['commands']):             
-                            self.form_err = (400,                                              
+                    if endpoint in ('/run'):
+                        if 'commands' not in c:
+                            self.form_err = (400,
+                            f"Malformed command '{c}': missing 'commands' field")
+                        elif not isinstance(c['commands'], list):
+                            self.form_err = (400,
+                            f"Malformed command '{c}': 'commands' field must be a list")
+                        elif not all(isinstance(el, str) for el in c['commands']):
+                            self.form_err = (400,
                             f"Malformed command '{0}': 'commands' field must be a list of strings")
                     if endpoint in ('/configure', '/configure-compare'):
                         if not c['path']:
@@ -842,7 +842,7 @@ def run_op(data: RunModel):
             completed = False
 
             # First line is a vbash warning. Pop it.
-            process.stdout.readline().decode()                                                                                                                               
+            process.stdout.readline().decode()
             for _ in range(RUN_MAXLINES):
                 line = process.stdout.readline().decode()
 
