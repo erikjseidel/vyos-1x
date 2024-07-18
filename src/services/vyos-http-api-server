@@ -16,6 +16,8 @@
 
 import os
 import sys
+import signal                                                                                                                                                                
+import psutil
 import grp
 import copy
 import json
@@ -23,8 +25,9 @@ import logging
 import signal
 import traceback
 import threading
+import subprocess
 
-from time import sleep
+from time import sleep, time
 from typing import List, Union, Callable, Dict
 
 from fastapi import FastAPI, Depends, Request, Response, HTTPException
@@ -51,6 +54,10 @@ from vyos.defaults import api_config_state
 from vyos.config_mgmt import ConfigMgmt
 
 import api.graphql.state
+
+RUN_COMMAND = ['/usr/bin/vbash', '-ic']
+RUN_TIMEOUT = 30
+RUN_MAXLINES = 10000
 
 CFG_GROUP = 'vyattacfg'
 
@@ -245,6 +252,17 @@ class RebootModel(ApiModel):
             }
         }
 
+class RunModel(ApiModel):                                                                                                                                                    
+    commands: List[StrictStr]                                                                                                                                                
+                                                                                                                                                                             
+    class Config:                                                                                                                                                            
+        schema_extra = {                                                                                                                                                     
+            "example": {                                                                                                                                                     
+                "key": "id_key",                                                                                                                                             
+                "commands": ["command1", "command2"],                                                                                                                        
+            }                                                                                                                                                                
+        } 
+
 class ResetModel(ApiModel):
     op: StrictStr
     path: List[StrictStr]
@@ -379,10 +397,11 @@ class MultipartRequest(Request):
                         self.form_err = (400,
                         f"Malformed command '{c}': any command must be JSON of dict")
                         return self._body
-                    if 'op' not in c:
-                        self.form_err = (400,
-                        f"Malformed command '{c}': missing 'op' field")
-                    if endpoint not in ('/config-file', '/container-image',
+                    if endpoint not in ('/run'):
+                        'op' not in 'c':
+                            self.form_err = (400,
+                            f"Malformed command '{c}': missing 'op' field")
+                    if endpoint not in ('/config-file', '/container-image', '/run',
                                         '/image', '/configure-section'):
                         if 'path' not in c:
                             self.form_err = (400,
@@ -393,6 +412,16 @@ class MultipartRequest(Request):
                         elif not all(isinstance(el, str) for el in c['path']):
                             self.form_err = (400,
                             f"Malformed command '{0}': 'path' field must be a list of strings")
+                    if endpoint in ('/run'):                                                   
+                        if 'commands' not in c:                                                
+                            self.form_err = (400,                                              
+                            f"Malformed command '{c}': missing 'commands' field")              
+                        elif not isinstance(c['commands'], list):                              
+                            self.form_err = (400,                                              
+                            f"Malformed command '{c}': 'commands' field must be a list")       
+                        elif not all(isinstance(el, str) for el in c['commands']):             
+                            self.form_err = (400,                                              
+                            f"Malformed command '{0}': 'commands' field must be a list of strings")
                     if endpoint in ('/configure', '/configure-compare'):
                         if not c['path']:
                             self.form_err = (400,
@@ -793,6 +822,58 @@ def reboot_op(data: RebootModel):
         return error(500, "An internal error occured. Check the logs for details.")
 
     return success(res)
+
+@app.post('/run')                                                                                                                                                            
+def run_op(data: RunModel):                                                                                                                                                  
+                                                                                                                                                                             
+    if len(data.commands) != 1:                                                                                                                                              
+        msg = 'Only one command string allowed at this time.'                                                                                                                
+        return error(400, msg)                                                                                                                                               
+                                                                                                                                                                             
+    command = RUN_COMMAND + data.commands                                                                                                                                    
+    text = ""                                                                                                                                                                
+                                                                                                                                                                             
+    try:                                                                                                                                                                     
+        with subprocess.Popen(command, shell=False, stdout=subprocess.PIPE,                                                                                                  
+                                       stderr=subprocess.STDOUT, ) as process:                                                                                               
+                                                                                                                                                                             
+            start_time = time()                                                                                                                                         
+            timeout = False                                                                                                                                                  
+            completed = False                                                                                                                                                
+                                                                                                                                                                             
+            # First line is a vbash warning. Pop it.                                                                                                                         
+            process.stdout.readline().decode()                                                                                                                               
+            for _ in range(RUN_MAXLINES):                                                                                                                                    
+                line = process.stdout.readline().decode()                                                                                                                    
+                                                                                                                                                                             
+                if not line:                                                                                                                                                 
+                    completed = True                                                                                                                                         
+                    break                                                                                                                                                    
+                                                                                                                                                                             
+                text += line                                                                                                                                                 
+                                                                                                                                                                             
+                if (time() - start_time) > RUN_TIMEOUT:                                                                                                                 
+                    timeout = True                                                                                                                                           
+                    break                                                                                                                                                    
+                                                                                                                                                                             
+            if (not completed or timeout) and process.poll() is None:                                                                                                        
+                for child in psutil.Process(process.pid).children(recursive=True):                                                                                           
+                    child.send_signal(signal.SIGKILL)                                                                                                                        
+                process.terminate()                                                                                                                                          
+                                                                                                                                                                             
+                msg = 'Max output lines reached. Process terminated.'                                                                                                        
+                if timeout:                                                                                                                                                  
+                    msg = 'Timeout reached. Process terminated.'                                                                                                             
+                                                                                                                                                                             
+                logger.critical(msg)                                                                                                                                         
+                                                                                                                                                                             
+                return error(500, text + msg)                                                                                                                                
+                                                                                                                                                                             
+    except Exception as e:                                                                                                                                                   
+        logger.critical(traceback.format_exc())                                                                                                                              
+        return error(500, "An internal error occured. Check the logs for details.")                                                                                          
+                                                                                                                                                                             
+    return success(text)
 
 @app.post('/reset')
 def reset_op(data: ResetModel):
