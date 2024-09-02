@@ -22,7 +22,6 @@ import grp
 import copy
 import json
 import logging
-import signal
 import traceback
 import threading
 import subprocess
